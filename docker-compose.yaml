@@ -1,0 +1,60 @@
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.8.0
+    container_name: elasticsearch
+    platform: linux/arm64/v8
+    logging:
+      driver: none
+    ports:
+      - "9200:9200"
+    environment:
+      discovery.type: "single-node"
+
+  fast-data-dev:
+    image: landoop/fast-data-dev:latest
+    container_name: fast-data-dev
+    ports:
+      - "8081:8081"
+      - "8082:8082"
+      - "8083:8083"
+      - "9092:9092"
+      - "2181:2181"
+      - "3030:3030"
+    environment:
+      CONNECT_PORT: "0"
+      RUNTESTS: "0"
+      ADV_HOST: "fast-data-dev"
+    healthcheck:
+      test: [
+        "CMD",
+        "sh",
+        "-c",
+        "curl -f http://localhost:8081/subjects && nc -z localhost 9092 && nc -z localhost 8082"
+      ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kafka-init:
+    build:
+      context: kafka-init
+    depends_on:
+      fast-data-dev:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_URL: "http://fast-data-dev:8081"
+      KAFKA_REST_PROXY_URL: "http://fast-data-dev:8082"
+      KAFKA_BOOTSTRAP_SERVERS: "PLAINTEXT://fast-data-dev:9092"
+      TOPIC_NAME: clicks
+    restart: "no"
+
+  kafka-consumer:
+    build:
+      context: .
+      dockerfile: kafka-consumer/Dockerfile
+    depends_on:
+      - kafka-init
+    environment:
+      ELASTIC_SEARCH_URL: "http://elasticsearch:9200"
+      KAFKA_BOOTSTRAP_SERVERS: "PLAINTEXT://fast-data-dev:9092"
+    restart: "no"
